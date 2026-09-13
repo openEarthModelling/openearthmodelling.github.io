@@ -1,0 +1,230 @@
+---
+const items = [
+  { label: 'Research Projects', href: '/research-projects' },
+  { label: 'Blogs', href: '/blogs' },
+  { label: 'Publications', href: '/publications' },
+  { label: 'People', href: '/people' },
+  { label: 'About', href: '/about' },
+];
+const path = Astro.url.pathname;
+const isActive = (href: string) => href !== '/' && path.startsWith(href);
+---
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="/">
+      <img src="/images/org-logo.png" alt="openEarthModelling logo" width="28" height="28" />
+      <span>openEarthModelling</span>
+    </a>
+    <nav aria-label="Primary">
+      {items.map((i) => <a href={i.href} class:list={[{ active: isActive(i.href) }]}>{i.label}</a>)}
+    </nav>
+    <button
+      class="menu-btn"
+      aria-label="Toggle navigation"
+      aria-expanded="false"
+      aria-controls="site-nav"
+    >
+      <span></span><span></span><span></span>
+    </button>
+    <a class="nav-gh" href="https://github.com/openEarthModelling">GitHub</a>
+  </div>
+  <div class="mobile-panel" id="site-nav">
+    {items.map((i) => <a href={i.href} class:list={[{ active: isActive(i.href) }]}>{i.label}</a>)}
+  </div>
+</header>
+
+<script>
+  const btn = document.querySelector<HTMLButtonElement>('.menu-btn');
+  const panel = document.querySelector<HTMLElement>('.mobile-panel');
+
+  const close = () => {
+    panel?.classList.remove('open');
+    btn?.setAttribute('aria-expanded', 'false');
+  };
+
+  btn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = panel?.classList.toggle('open') ?? false;
+    btn.setAttribute('aria-expanded', String(open));
+  });
+  panel?.querySelectorAll('a').forEach((a) => a.addEventListener('click', close));
+  document.addEventListener('click', (e) => {
+    if (panel?.classList.contains('open') && !panel.contains(e.target as Node) && !btn?.contains(e.target as Node)) {
+      close();
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') close();
+  });
+  window.addEventListener('resize', () => {
+    if (window.innerWidth >= 700) close();
+  });
+</script>
+
+<style>
+  .nav {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 3;
+  }
+  .nav-inner {
+    max-width: 1280px;
+    margin: 0 auto;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 0 clamp(1rem, 4vw, 4rem);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    text-decoration: none;
+  }
+  .brand img {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: block;
+  }
+  .brand span {
+    color: var(--text);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    font-size: 0.9rem;
+    transition: color 0.2s;
+    white-space: nowrap;
+  }
+  .brand:hover span {
+    color: var(--accent-soft);
+  }
+  nav {
+    display: flex;
+    gap: 0.9rem;
+    margin-left: auto;
+  }
+  nav a {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    transition: color 0.2s;
+    white-space: nowrap;
+  }
+  nav a:hover,
+  nav a.active {
+    color: var(--text);
+  }
+  .nav-gh {
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    border: 1px solid #3f3f46;
+    border-radius: 999px;
+    padding: 7px 13px;
+    white-space: nowrap;
+    transition:
+      border-color 0.2s,
+      color 0.2s;
+  }
+  .nav-gh:hover {
+    border-color: var(--accent);
+    color: var(--accent-soft);
+  }
+
+  /* hamburger: only below 900px */
+  .menu-btn {
+    display: none;
+    width: 40px;
+    height: 40px;
+    border: 1px solid #3f3f46;
+    border-radius: 999px;
+    background: transparent;
+    cursor: pointer;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    margin-left: auto;
+  }
+  .menu-btn span {
+    display: block;
+    width: 16px;
+    height: 1.5px;
+    background: var(--text);
+    transition:
+      transform 0.2s,
+      opacity 0.2s;
+  }
+  .menu-btn[aria-expanded='true'] span:nth-child(1) {
+    transform: translateY(5.5px) rotate(45deg);
+  }
+  .menu-btn[aria-expanded='true'] span:nth-child(2) {
+    opacity: 0;
+  }
+  .menu-btn[aria-expanded='true'] span:nth-child(3) {
+    transform: translateY(-5.5px) rotate(-45deg);
+  }
+
+  .mobile-panel {
+    display: none;
+  }
+
+  @media (max-width: 699px) {
+    nav {
+      display: none;
+    }
+    .menu-btn {
+      display: flex;
+    }
+    .mobile-panel {
+      display: flex;
+      flex-direction: column;
+      position: absolute;
+      top: 64px;
+      left: 0;
+      right: 0;
+      padding: 0.5rem clamp(1.25rem, 5vw, 4rem) 1rem;
+      background: rgba(9, 9, 11, 0.97);
+      border-bottom: 1px solid #1f1f23;
+      opacity: 0;
+      transform: translateY(-8px);
+      pointer-events: none;
+      transition:
+        opacity 0.2s,
+        transform 0.2s;
+    }
+    .mobile-panel.open {
+      opacity: 1;
+      transform: none;
+      pointer-events: auto;
+    }
+  }
+  .mobile-panel a {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 1rem;
+    padding: 0.7rem 0;
+    border-bottom: 1px solid #18181b;
+  }
+  .mobile-panel a:last-child {
+    border-bottom: none;
+  }
+  .mobile-panel a:hover,
+  .mobile-panel a.active {
+    color: var(--text);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .menu-btn span,
+    .mobile-panel,
+    nav a,
+    .nav-gh,
+    .brand span {
+      transition: none;
+    }
+  }
+</style>

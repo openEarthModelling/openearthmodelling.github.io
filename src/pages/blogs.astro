@@ -1,0 +1,65 @@
+---
+import Base from '../layouts/Base.astro';
+import { getCollection } from 'astro:content';
+
+const posts = (await getCollection('blog')).sort(
+  (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf(),
+);
+---
+
+<Base title="Blogs - openEarthModelling">
+  <main class="mx-auto max-w-[720px] px-6 pt-32 pb-16">
+    <h1 class="text-3xl font-semibold tracking-tight">Blogs</h1>
+    {
+      posts.length === 0 ? (
+        <p class="mt-4" style="color: var(--text-dim);">Nothing published yet.</p>
+      ) : (
+        <ul class="posts">
+          {posts.map((p) => (
+            <li>
+              <a href={`/blogs/${p.id}/`}>{p.data.title}</a>
+              {p.data.description && <p>{p.data.description}</p>}
+              <time datetime={p.data.pubDate.toISOString()}>
+                {p.data.pubDate.toISOString().slice(0, 10)}
+              </time>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </main>
+</Base>
+
+<style>
+  .posts {
+    margin-top: 2rem;
+    padding: 0;
+    list-style: none;
+  }
+  .posts li {
+    padding: 1.4rem 0;
+    border-bottom: 1px solid #18181b;
+  }
+  .posts a {
+    color: var(--text);
+    text-decoration: none;
+    font-size: 1.15rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  .posts a:hover {
+    color: var(--accent-soft);
+  }
+  .posts p {
+    margin: 0.5rem 0 0;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+  .posts time {
+    display: block;
+    margin-top: 0.6rem;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    font-family: 'Geist Mono', ui-monospace, monospace;
+  }
+</style>

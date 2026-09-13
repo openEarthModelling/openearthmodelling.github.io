@@ -1,0 +1,140 @@
+---
+import Base from '../../layouts/Base.astro';
+import { getCollection, render } from 'astro:content';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog');
+  return posts.map((p) => ({ params: { slug: p.id }, props: { post: p } }));
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+---
+
+<Base title={`${post.data.title} - openEarthModelling`}>
+  <main class="mx-auto max-w-[720px] px-6 pt-32 pb-16">
+    <header>
+      <h1 class="text-3xl font-semibold tracking-tight md:text-4xl">{post.data.title}</h1>
+      <p class="meta">
+        <time datetime={post.data.pubDate.toISOString()}>
+          {post.data.pubDate.toISOString().slice(0, 10)}
+        </time>
+        <span aria-hidden="true">/</span>
+        <span>{post.data.author}</span>
+      </p>
+    </header>
+    <article class="prose">
+      <Content />
+    </article>
+    <p class="mt-12">
+      <a href="/blogs/" class="back">&larr; All posts</a>
+    </p>
+  </main>
+</Base>
+
+<style>
+  .meta {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.9rem;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    font-family: 'Geist Mono', ui-monospace, monospace;
+  }
+  .back {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.9rem;
+  }
+  .back:hover {
+    color: var(--accent-soft);
+  }
+</style>
+
+<style is:global>
+  .prose {
+    margin-top: 2.5rem;
+    font-size: 1.02rem;
+    line-height: 1.75;
+    color: #d4d4d8;
+  }
+  .prose h2 {
+    margin: 2.4rem 0 0.9rem;
+    font-size: 1.35rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  .prose h3 {
+    margin: 1.8rem 0 0.7rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .prose p {
+    margin: 0.95rem 0;
+  }
+  .prose a {
+    color: var(--accent-soft);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(103, 232, 249, 0.35);
+  }
+  .prose a:hover {
+    border-bottom-color: var(--accent-soft);
+  }
+  .prose ul,
+  .prose ol {
+    margin: 1rem 0;
+    padding-left: 1.4rem;
+  }
+  .prose li {
+    margin: 0.45rem 0;
+  }
+  .prose ul {
+    list-style: disc;
+  }
+  .prose ol {
+    list-style: decimal;
+  }
+  .prose strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .prose code {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 0.88em;
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 5px;
+    padding: 0.12em 0.4em;
+  }
+  .prose pre {
+    background: #101014;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+  .prose pre code {
+    background: none;
+    border: none;
+    padding: 0;
+  }
+  .prose blockquote {
+    margin: 1.2rem 0;
+    padding: 0.2rem 0 0.2rem 1.1rem;
+    border-left: 2px solid var(--accent);
+    color: var(--text-dim);
+  }
+  .prose hr {
+    margin: 2.2rem 0;
+    border: none;
+    border-top: 1px solid #27272a;
+  }
+  .prose img {
+    max-width: 100%;
+    border-radius: 10px;
+  }
+</style>

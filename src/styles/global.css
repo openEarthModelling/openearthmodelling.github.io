@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* Design tokens: docs/design/hero.md §3 */
+:root {
+  --bg: #09090b;
+  --text: #f4f4f5;
+  --text-dim: #a1a1aa;
+  --accent: #22d3ee;
+  --accent-soft: #67e8f9;
+  --globe-alpha: 1;
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Geist", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}

@@ -1,0 +1,198 @@
+---
+// Hero: copy & layout per docs/design/hero.md §2/§6.
+// The WebGL globe itself lives in src/scripts/globe.ts (spec §4).
+---
+
+<section class="hero" id="hero">
+  <canvas
+    id="globe"
+    role="img"
+    aria-label="Interactive realistic globe of Earth with layered ocean, land and atmosphere model grids and drifting clouds. Drag horizontally to rotate."></canvas>
+  <div class="scrim"></div>
+  <div id="globe-fallback" hidden>
+    <div class="ball"></div>
+    <p>3D preview needs WebGL. The site works without it.</p>
+  </div>
+  <div class="hero-inner" id="hero-text">
+    <h1>The Earth, modelled<br />in the <em>open.</em></h1>
+    <p class="sub">An open research group building computational software for the Earth system.</p>
+    <div class="ctas">
+      <a class="btn primary" href="https://github.com/openEarthModelling">Explore on GitHub</a>
+      <a class="btn ghost" href="/research-projects">View projects</a>
+    </div>
+  </div>
+</section>
+
+<script>
+  import { initGlobe } from '../scripts/globe';
+
+  const canvas = document.getElementById('globe') as HTMLCanvasElement;
+  const hero = document.getElementById('hero') as HTMLElement;
+  const heroText = document.getElementById('hero-text') as HTMLElement;
+  const fallback = document.getElementById('globe-fallback') as HTMLElement;
+
+  const probe = document.createElement('canvas');
+  if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
+    canvas.remove();
+    fallback.hidden = false;
+  } else {
+    // screenshot helper: ?shot skips the canvas fade-in
+    if (location.search.includes('shot')) canvas.style.transition = 'none';
+    initGlobe(canvas, hero, heroText);
+  }
+</script>
+
+<style>
+  .hero {
+    position: relative;
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+  #globe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: grab;
+    touch-action: pan-y;
+    z-index: 0;
+    opacity: 0;
+    transition: opacity 1.4s ease 0.1s;
+  }
+  #globe.ready {
+    opacity: var(--globe-alpha);
+  }
+  #globe.dragging {
+    cursor: grabbing;
+  }
+  .scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: none;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      rgba(9, 9, 11, 0.25) 0%,
+      rgba(9, 9, 11, 0) 30%,
+      rgba(9, 9, 11, 0.78) 72%,
+      #09090b 96%
+    );
+  }
+  .hero-inner {
+    position: relative;
+    z-index: 2;
+    max-width: 1280px;
+    margin: 0 auto;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 clamp(1.25rem, 5vw, 4rem);
+    pointer-events: none;
+    will-change: transform;
+  }
+  .hero-inner a {
+    pointer-events: auto;
+  }
+  h1 {
+    font-size: clamp(2.5rem, 5.6vw, 4.4rem);
+    line-height: 1.12;
+    letter-spacing: -0.025em;
+    font-weight: 600;
+    max-width: 640px;
+  }
+  h1 em {
+    font-style: italic;
+    color: var(--accent-soft);
+  }
+  .sub {
+    margin-top: 1.35rem;
+    font-size: 1.1rem;
+    line-height: 1.6;
+    color: var(--text-dim);
+    max-width: 36em;
+  }
+  .ctas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    margin-top: 2.4rem;
+  }
+  .btn {
+    display: inline-block;
+    text-decoration: none;
+    font-size: 0.95rem;
+    font-weight: 500;
+    padding: 13px 24px;
+    border-radius: 999px;
+    transition:
+      background 0.2s,
+      border-color 0.2s,
+      color 0.2s;
+  }
+  .btn:active {
+    transform: translateY(1px);
+  }
+  .btn.primary {
+    background: var(--accent);
+    color: #05242b;
+    font-weight: 600;
+  }
+  .btn.primary:hover {
+    background: var(--accent-soft);
+  }
+  .btn.ghost {
+    border: 1px solid #3f3f46;
+    color: var(--text);
+  }
+  .btn.ghost:hover {
+    border-color: var(--accent);
+    color: var(--accent-soft);
+  }
+
+  /* WebGL fallback: CSS sphere */
+  #globe-fallback {
+    position: absolute;
+    right: -6vmin;
+    bottom: -8vmin;
+    z-index: 0;
+  }
+  #globe-fallback .ball {
+    width: 58vmin;
+    height: 58vmin;
+    border-radius: 50%;
+    background: radial-gradient(circle at 36% 32%, #2a5d8a, #0d2438 55%, #09090b 78%);
+    box-shadow: inset -3vmin -3vmin 8vmin rgba(34, 211, 238, 0.12);
+  }
+  #globe-fallback p {
+    position: absolute;
+    bottom: 10%;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  /* mobile: text on top, globe dimmed below (spec §2) */
+  :global(body.mobile-hero) {
+    --globe-alpha: 0.5;
+  }
+  :global(body.mobile-hero) .scrim {
+    display: block;
+  }
+  :global(body.mobile-hero) .hero-inner {
+    justify-content: flex-start;
+    padding-top: 21vh;
+    min-height: auto;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #globe,
+    .btn {
+      transition: none;
+    }
+  }
+</style>

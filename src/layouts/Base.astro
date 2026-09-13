@@ -1,0 +1,29 @@
+---
+import Nav from '../components/Nav.astro';
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+}
+const { title = 'openEarthModelling' } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <Nav />
+    <slot />
+    <footer class="mx-auto flex max-w-[1280px] items-center justify-between px-[clamp(1.25rem,5vw,4rem)] py-8 text-sm" style="color: var(--text-dim);">
+      <span>© 2026 openEarthModelling</span>
+      <a href="https://github.com/openEarthModelling" class="transition-colors hover:text-[var(--accent-soft)]" style="color: var(--text-dim); text-decoration: none;">GitHub</a>
+    </footer>
+  </body>
+</html>

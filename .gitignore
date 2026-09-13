@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.astro/
+.DS_Store
+.tgrep/
+npm-debug.log*
+.claude/
+.agents/
+skills-lock.json

@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>openEarthModelling - hero prototype v3</title>
+<style>
+  /* Design tokens: docs/design/hero.md §3 (v1.4) */
+  :root {
+    --bg: #09090b;
+    --text: #f4f4f5;
+    --text-dim: #a1a1aa;
+    --accent: #22d3ee;
+    --accent-soft: #67e8f9;
+    --globe-alpha: 1;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Geist", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- nav: 64px, one line ---------- */
+  .nav { position: absolute; top: 0; left: 0; right: 0; z-index: 3; }
+  .nav-inner {
+    max-width: 1280px; margin: 0 auto; height: 64px;
+    display: flex; align-items: center; gap: 1.25rem;
+    padding: 0 clamp(1.25rem, 5vw, 4rem);
+  }
+  .brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; }
+  .brand img { width: 28px; height: 28px; border-radius: 50%; display: block; }
+  .brand span { color: var(--text); font-weight: 600; letter-spacing: -0.01em; font-size: 0.95rem; }
+  .nav nav { display: flex; gap: 1.6rem; margin-left: auto; }
+  .nav nav a { color: var(--text-dim); text-decoration: none; font-size: 0.9rem; transition: color 0.2s; }
+  .nav nav a:hover { color: var(--text); }
+  .nav-gh {
+    color: var(--text); text-decoration: none; font-size: 0.875rem;
+    border: 1px solid #3f3f46; border-radius: 999px; padding: 7px 16px;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .nav-gh:hover { border-color: var(--accent); color: var(--accent-soft); }
+
+  /* ---------- hero ---------- */
+  .hero { position: relative; min-height: 100dvh; overflow: hidden; }
+  #globe {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: block; cursor: grab; touch-action: pan-y; z-index: 0;
+    opacity: 0; transition: opacity 1.4s ease 0.1s;
+  }
+  #globe.ready { opacity: var(--globe-alpha); }
+  #globe.dragging { cursor: grabbing; }
+  .scrim {
+    position: absolute; inset: 0; z-index: 1; display: none; pointer-events: none;
+    background: linear-gradient(180deg,
+      rgba(9,9,11,0.25) 0%, rgba(9,9,11,0) 30%,
+      rgba(9,9,11,0.78) 72%, #09090b 96%);
+  }
+  .hero-inner {
+    position: relative; z-index: 2;
+    max-width: 1280px; margin: 0 auto; min-height: 100dvh;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 0 clamp(1.25rem, 5vw, 4rem);
+    pointer-events: none; will-change: transform;
+  }
+  .hero-inner a { pointer-events: auto; }
+  h1 {
+    font-size: clamp(2.5rem, 5.6vw, 4.4rem);
+    line-height: 1.12; letter-spacing: -0.025em; font-weight: 600;
+    max-width: 640px;
+  }
+  h1 em { font-style: italic; color: var(--accent-soft); }
+  .sub {
+    margin-top: 1.35rem; font-size: 1.1rem; line-height: 1.6;
+    color: var(--text-dim); max-width: 36em;
+  }
+  .ctas { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-top: 2.4rem; }
+  .btn {
+    display: inline-block; text-decoration: none; font-size: 0.95rem;
+    font-weight: 500; padding: 13px 24px; border-radius: 999px;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: var(--accent); color: #05242b; font-weight: 600; }
+  .btn.primary:hover { background: var(--accent-soft); }
+  .btn.ghost { border: 1px solid #3f3f46; color: var(--text); }
+  .btn.ghost:hover { border-color: var(--accent); color: var(--accent-soft); }
+
+  /* WebGL fallback: CSS sphere */
+  #globe-fallback { position: absolute; right: -6vmin; bottom: -8vmin; z-index: 0; }
+  #globe-fallback .ball {
+    width: 58vmin; height: 58vmin; border-radius: 50%;
+    background: radial-gradient(circle at 36% 32%, #2a5d8a, #0d2438 55%, #09090b 78%);
+    box-shadow: inset -3vmin -3vmin 8vmin rgba(34, 211, 238, 0.12);
+  }
+  #globe-fallback p {
+    position: absolute; bottom: 10%; left: 50%; transform: translateX(-50%);
+    color: var(--text-dim); font-size: 0.8rem; white-space: nowrap;
+  }
+
+  /* mobile */
+  body.mobile-hero { --globe-alpha: 0.5; }
+  body.mobile-hero .scrim { display: block; }
+  body.mobile-hero .hero-inner { justify-content: flex-start; padding-top: 21vh; min-height: auto; }
+  body.mobile-hero .nav nav { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    #globe { transition: none; }
+    .btn, .nav-gh, .nav nav a { transition: none; }
+  }
+</style>
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#">
+      <img src="../assets/org-logo.png" alt="openEarthModelling logo">
+      <span>openEarthModelling</span>
+    </a>
+    <nav>
+      <a href="#">Research Projects</a>
+      <a href="#">Blogs</a>
+      <a href="#">Publications</a>
+      <a href="#">People</a>
+      <a href="#">About</a>
+    </nav>
+    <a class="nav-gh" href="https://github.com/openEarthModelling">GitHub</a>
+  </div>
+</header>
+
+<section class="hero" id="hero">
+  <canvas id="globe" role="img"
+    aria-label="Interactive realistic globe of Earth with layered ocean, land and atmosphere model grids and drifting clouds. Drag horizontally to rotate."></canvas>
+  <div class="scrim"></div>
+  <div id="globe-fallback" hidden>
+    <div class="ball"></div>
+    <p>3D preview needs WebGL. The site works without it.</p>
+  </div>
+  <div class="hero-inner" id="hero-text">
+    <h1>The Earth, modelled<br>in the <em>open.</em></h1>
+    <p class="sub">An open research group building computational software for the Earth system.</p>
+    <div class="ctas">
+      <a class="btn primary" href="https://github.com/openEarthModelling">Explore on GitHub</a>
+      <a class="btn ghost" href="#projects">View projects</a>
+    </div>
+  </div>
+</section>
+
+<script type="importmap">
+{ "imports": { "three": "https://registry.npmmirror.com/three/0.170.0/files/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* ============================================================
+   Realistic Earth + layered model grids (spec v1.4 §4)
+   Layers (inside out):
+     earth sphere (day/night shader)
+     ocean grid  1.002R  azure blue, classified from day texture
+     land grid   1.010R  cyan (site accent), nodes echo the org logo
+     clouds      1.018/1.030R  double transparent shell (offset patterns)
+     atmo grid   1.170R  pale ice cage, drifts with the clouds
+     fresnel rim 1.240R
+   ============================================================ */
+
+const heroEl = document.getElementById('hero');
+const canvas = document.getElementById('globe');
+const heroText = document.getElementById('hero-text');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const finePointer = matchMedia('(pointer: fine)').matches;
+
+const probe = document.createElement('canvas');
+if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
+  canvas.remove();
+  document.getElementById('globe-fallback').hidden = false;
+} else {
+  main();
+}
+
+function main() {
+  // ---- tunables (spec §4 / §5) ----
+  const R = 2;
+  const SURFACE_DETAIL = { desktop: 9, mobile: 7 };  // ~1002 / ~642 cells
+  const ATMO_DETAIL = { desktop: 8, mobile: 6 };     // ~812 / ~442 cells
+  const OCEAN_R = R * 1.002, LAND_R = R * 1.010, ATMO_R = R * 1.17;
+  const OCEAN_LINE = { color: 0x1d76c4, opacity: 0.22 };  // azure blue
+  const LAND_LINE  = { color: 0x22d3ee, opacity: 0.34 };  // cyan (site accent)
+  const ATMO_LINE  = { color: 0xc9e9f7, opacity: 0.22 };  // pale ice
+  const AUTO_SPEED = 0.07;       // rad/s
+  const ATMO_DRIFT = 0.012;      // rad/s eastward (clouds + atmosphere grid)
+  const MAX_TILT = 1.1;
+  const DPR_CAP = 2;
+  const LAYOUT = {
+    desktop: { x: 3.6, y: -0.05, scale: 1.0 },
+    tablet:  { x: 2.6, y: 0,     scale: 0.95 },
+    mobile:  { x: 0,   y: -1.15, scale: 0.85 },
+  };
+  const SUN = new THREE.Vector3(-1.2, 0.5, 0.9).normalize();
+  const TG = 'https://registry.npmmirror.com/three-globe/2.45.2/files/example/img/';
+  const DAY_URLS = [TG + 'earth-blue-marble.jpg',
+    'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg',
+    'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-blue-marble.jpg'];
+  const NIGHT_URLS = [TG + 'earth-night.jpg',
+    'https://unpkg.com/three-globe/example/img/earth-night.jpg',
+    'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg'];
+  const CLOUD_URLS = [
+    'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r170/examples/textures/planets/earth_clouds_1024.png',
+    'https://threejs.org/examples/textures/planets/earth_clouds_1024.png',
+    'https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/textures/planets/earth_clouds_1024.png'];
+
+  const isMobile = () => innerWidth < 768;
+
+  // ---- renderer / scene / camera ----
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, DPR_CAP));
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 120);
+  camera.position.set(0, 0, 9);
+
+  const parallaxGroup = new THREE.Group();
+  const globeGroup = new THREE.Group();
+  const atmoGroup = new THREE.Group();   // clouds + atmosphere grid drift together
+  globeGroup.add(atmoGroup);
+  parallaxGroup.add(globeGroup);
+  scene.add(parallaxGroup);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+  const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+  sun.position.copy(SUN).multiplyScalar(10);
+  scene.add(sun);
+
+  // ---- starfield (desktop only, spec §4.5) ----
+  if (!isMobile()) {
+    const sp = [];
+    for (let i = 0; i < 650; i++) {
+      const v = new THREE.Vector3().randomDirection().multiplyScalar(18 + Math.random() * 22);
+      sp.push(v.x, v.y, v.z);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
+    scene.add(new THREE.Points(g, new THREE.PointsMaterial({
+      color: 0x8fb3c9, size: 0.05, sizeAttenuation: true,
+      transparent: true, opacity: 0.45, depthWrite: false,
+    })));
+  }
+
+  // ---- interaction state (spec §5) ----
+  const rot = { x: 0.24, y: -1.83 };   // initial view: East Asia
+  const vel = { x: 0, y: 0 };
+  let dragging = false, lastX = 0, lastY = 0, lastT = 0;
+  let lastInteract = -1e9;
+  let atmoAngle = 0;
+  let par = { x: 0, y: 0 }, parT = { x: 0, y: 0 };
+
+  // ============================================================
+  // hex grid lattice: dual of a subdivided icosahedron.
+  // Returns unit-sphere segments (with midpoints) and vertices;
+  // callers scale to their layer radius and classify ocean/land.
+  // ============================================================
+  function buildHexLattice(detail) {
+    const geo = new THREE.IcosahedronGeometry(1, detail);
+    const pos = geo.attributes.position;
+    const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
+    const faces = [], centroids = [];
+    for (let i = 0; i < pos.count; i += 3) {
+      A.fromBufferAttribute(pos, i);
+      B.fromBufferAttribute(pos, i + 1);
+      C.fromBufferAttribute(pos, i + 2);
+      faces.push([A.clone(), B.clone(), C.clone()]);
+      centroids.push(A.clone().add(B).add(C).normalize());
+    }
+    const Q = 1e5;
+    const key = v => Math.round(v.x * Q) + ',' + Math.round(v.y * Q) + ',' + Math.round(v.z * Q);
+    const edges = new Map();
+    faces.forEach((f, fi) => {
+      for (let e = 0; e < 3; e++) {
+        const k1 = key(f[e]), k2 = key(f[(e + 1) % 3]);
+        const ek = k1 < k2 ? k1 + '|' + k2 : k2 + '|' + k1;
+        const rec = edges.get(ek);
+        if (rec) rec.push(fi); else edges.set(ek, [fi]);
+      }
+    });
+    const segs = [];   // { a, b, mid } unit vectors
+    edges.forEach(fl => {
+      if (fl.length !== 2) return;
+      const a = centroids[fl[0]], b = centroids[fl[1]];
+      segs.push({ a, b, mid: a.clone().add(b).normalize() });
+    });
+    const nodeMap = new Map();
+    faces.forEach(f => f.forEach(v => nodeMap.set(key(v), v)));
+    return { segs, nodes: [...nodeMap.values()] };
+  }
+
+  // ocean/land classifier from the day texture (spec §4.4):
+  // downsample once to 1024x512, blue-dominant pixel = ocean
+  function makeClassifier(dayTex) {
+    if (!dayTex) return null;
+    const img = dayTex.image;
+    const w = 1024, h = 512;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, w, h);
+    const d = ctx.getImageData(0, 0, w, h).data;
+    return (v) => {
+      const lat = Math.asin(Math.max(-1, Math.min(1, v.y)));
+      const lon = Math.atan2(v.x, v.z);
+      const px = Math.min(w - 1, Math.max(0, Math.floor((lon / (2 * Math.PI) + 0.5) * w)));
+      const py = Math.min(h - 1, Math.max(0, Math.floor((0.5 - lat / Math.PI) * h)));
+      const i = (py * w + px) * 4;
+      const r = d[i] / 255, b = d[i + 2] / 255;
+      return (b > r + 0.06 && b > 0.16) ? 'ocean' : 'land';
+    };
+  }
+
+  function lineObj(positions, { color, opacity }) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({
+      color, transparent: true, opacity,
+    }));
+    l.renderOrder = 1;
+    return l;
+  }
+  function nodeObj(positions, { color, opacity, size }) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    const p = new THREE.Points(g, new THREE.PointsMaterial({
+      color, size, sizeAttenuation: true, transparent: true, opacity, depthWrite: false,
+    }));
+    p.renderOrder = 1;
+    return p;
+  }
+
+  // ---- day/night earth shader (spec §4.2) ----
+  const earthVert = `
+    varying vec2 vUv;
+    varying vec3 vWn;
+    void main() {
+      vUv = uv;
+      vWn = normalize(mat3(modelMatrix) * normal);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`;
+  const earthFrag = `
+    uniform sampler2D dayMap;
+    uniform sampler2D nightMap;
+    uniform vec3 sunDir;
+    varying vec2 vUv;
+    varying vec3 vWn;
+    void main() {
+      vec3 n = normalize(vWn);
+      float d = dot(n, normalize(sunDir));
+      float dayAmt = smoothstep(-0.15, 0.25, d);
+      vec3 day = texture2D(dayMap, vUv).rgb;
+      vec3 night = texture2D(nightMap, vUv).rgb;
+      vec3 nightCol = night * 1.7 + day * 0.02;
+      vec3 dayCol = day * (0.28 + 0.95 * clamp(d, 0.0, 1.0));
+      gl_FragColor = vec4(mix(nightCol, dayCol, dayAmt), 1.0);
+    }`;
+
+  function build(day, night, clouds) {
+    // earth sphere
+    const earthGeo = new THREE.SphereGeometry(R, 96, 96);
+    if (day) {
+      globeGroup.add(new THREE.Mesh(earthGeo, new THREE.ShaderMaterial({
+        uniforms: {
+          dayMap: { value: day },
+          nightMap: { value: night || day },
+          sunDir: { value: SUN },
+        },
+        vertexShader: earthVert,
+        fragmentShader: earthFrag,
+      })));
+    } else {
+      globeGroup.add(new THREE.Mesh(earthGeo,
+        new THREE.MeshLambertMaterial({ color: 0x0d2438 })));
+    }
+
+    // clouds -> atmosphere group (drifts with the atmo grid)
+    // two shells at different radii with offset rotation = thicker deck
+    if (clouds) {
+      [[1.018, 0.75, 0], [1.030, 0.50, 2.1]].forEach(([rr, op, off]) => {
+        const m = new THREE.Mesh(
+          new THREE.SphereGeometry(R * rr, 96, 96),
+          new THREE.MeshLambertMaterial({
+            map: clouds, transparent: true, opacity: op, depthWrite: false,
+          })
+        );
+        m.renderOrder = 2;
+        m.rotation.y = off;
+        atmoGroup.add(m);
+      });
+    }
+
+    // ---- surface layer: ocean grid + land grid (spec §4.4) ----
+    const surf = buildHexLattice(isMobile() ? SURFACE_DETAIL.mobile : SURFACE_DETAIL.desktop);
+    const classify = makeClassifier(day);
+    const landSeg = [], oceanSeg = [], landNodes = [], oceanNodes = [];
+    surf.segs.forEach(s => {
+      const isOcean = classify && classify(s.mid) === 'ocean';
+      const rr = isOcean ? OCEAN_R : LAND_R;
+      const buf = isOcean ? oceanSeg : landSeg;
+      buf.push(s.a.x * rr, s.a.y * rr, s.a.z * rr, s.b.x * rr, s.b.y * rr, s.b.z * rr);
+    });
+    surf.nodes.forEach(v => {
+      const isOcean = classify && classify(v) === 'ocean';
+      const rr = isOcean ? OCEAN_R : LAND_R;
+      const buf = isOcean ? oceanNodes : landNodes;
+      buf.push(v.x * rr, v.y * rr, v.z * rr);
+    });
+    globeGroup.add(lineObj(landSeg, LAND_LINE));
+    globeGroup.add(lineObj(oceanSeg, OCEAN_LINE));
+    globeGroup.add(nodeObj(landNodes, { color: 0x67e8f9, opacity: 0.55, size: 0.030 }));
+    globeGroup.add(nodeObj(oceanNodes, { color: 0x86c5ee, opacity: 0.28, size: 0.022 }));
+
+    // ---- atmosphere cage: coarse, pale, drifts with clouds ----
+    const atmo = buildHexLattice(isMobile() ? ATMO_DETAIL.mobile : ATMO_DETAIL.desktop);
+    const atmoSeg = [];
+    atmo.segs.forEach(s => {
+      atmoSeg.push(s.a.x * ATMO_R, s.a.y * ATMO_R, s.a.z * ATMO_R,
+                   s.b.x * ATMO_R, s.b.y * ATMO_R, s.b.z * ATMO_R);
+    });
+    atmoGroup.add(lineObj(atmoSeg, ATMO_LINE));
+
+    // ---- fresnel rim ----
+    const rim = new THREE.Mesh(
+      new THREE.SphereGeometry(R * 1.24, 64, 64),
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide, transparent: true,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+        vertexShader: `
+          varying vec3 vN;
+          void main() {
+            vN = normalize(normalMatrix * normal);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }`,
+        fragmentShader: `
+          varying vec3 vN;
+          void main() {
+            float i = pow(clamp(0.62 - dot(vN, vec3(0.0, 0.0, 1.0)), 0.0, 1.0), 3.0);
+            gl_FragColor = vec4(0.28, 0.78, 0.92, 1.0) * i * 0.55;
+          }`,
+      })
+    );
+    rim.renderOrder = 3;
+    globeGroup.add(rim);
+
+    applyRotation();
+    canvas.classList.add('ready');
+    if (reduced) renderOnce();
+  }
+
+  // ---- texture loader with fallback chain ----
+  function loadTex(urls) {
+    return new Promise(resolve => {
+      const tryAt = i => {
+        if (i >= urls.length) return resolve(null);
+        new THREE.TextureLoader().load(urls[i],
+          t => { t.colorSpace = THREE.SRGBColorSpace; resolve(t); },
+          undefined,
+          () => tryAt(i + 1));
+      };
+      tryAt(0);
+    });
+  }
+  Promise.all([loadTex(DAY_URLS), loadTex(NIGHT_URLS), loadTex(CLOUD_URLS)])
+    .then(([d, n, c]) => build(d, n, c));
+
+  // ============================================================
+  // interaction (spec §5)
+  // ============================================================
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    canvas.classList.add('dragging');
+    canvas.setPointerCapture(e.pointerId);
+    lastX = e.clientX; lastY = e.clientY; lastT = performance.now();
+    vel.x = vel.y = 0;
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const now = performance.now();
+    const dt = Math.max(1, now - lastT);
+    const k = 0.005;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    rot.y += dx * k;
+    rot.x = Math.max(-MAX_TILT, Math.min(MAX_TILT, rot.x + dy * k));
+    vel.y = (dx / dt) * 1000 * k;
+    vel.x = (dy / dt) * 1000 * k;
+    lastX = e.clientX; lastY = e.clientY; lastT = now;
+    applyRotation();
+    if (reduced) renderOnce();
+  });
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    canvas.classList.remove('dragging');
+    lastInteract = performance.now();
+    if (reduced) { vel.x = vel.y = 0; }
+  };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+
+  if (finePointer && !reduced) {
+    window.addEventListener('pointermove', (e) => {
+      if (dragging) return;
+      parT.x = e.clientX / innerWidth - 0.5;
+      parT.y = e.clientY / innerHeight - 0.5;
+    });
+  }
+
+  function applyRotation() {
+    globeGroup.rotation.set(rot.x, rot.y, 0);
+    atmoGroup.rotation.y = atmoAngle;
+  }
+
+  // ---- layout (spec §2) ----
+  function layout() {
+    const w = heroEl.clientWidth, h = heroEl.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    const L = w >= 1024 ? LAYOUT.desktop : (w >= 768 ? LAYOUT.tablet : LAYOUT.mobile);
+    globeGroup.position.set(L.x, L.y, 0);
+    globeGroup.scale.setScalar(L.scale);
+    document.body.classList.toggle('mobile-hero', w < 768);
+    if (reduced) renderOnce();
+  }
+  layout();
+  window.addEventListener('resize', layout);
+
+  // ---- frame loop (reduced-motion: render on demand instead) ----
+  function renderOnce() { renderer.render(scene, camera); }
+
+  if (!reduced) {
+    let prev = performance.now();
+    const loop = (now) => {
+      const dt = Math.min(0.05, (now - prev) / 1000);
+      prev = now;
+      if (!dragging) {
+        rot.y += vel.y * dt;
+        rot.x = Math.max(-MAX_TILT, Math.min(MAX_TILT, rot.x + vel.x * dt));
+        const damp = Math.exp(-2.8 * dt);
+        vel.x *= damp; vel.y *= damp;
+        if (now - lastInteract > 1500) rot.y += AUTO_SPEED * dt;
+      }
+      atmoAngle += ATMO_DRIFT * dt;
+      par.x += (parT.x - par.x) * 0.045;
+      par.y += (parT.y - par.y) * 0.045;
+      parallaxGroup.rotation.x = par.y * 0.10;
+      parallaxGroup.rotation.y = par.x * 0.14;
+      heroText.style.transform = `translate(${(-par.x * 8).toFixed(2)}px, ${(-par.y * 6).toFixed(2)}px)`;
+      applyRotation();
+      renderer.render(scene, camera);
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+}
+</script>
+</body>
+</html>
