@@ -1,12 +1,144 @@
 ---
 import Base from '../layouts/Base.astro';
+import pubs from '../data/publications.json';
+
+const byYear = new Map<number | string, typeof pubs>();
+for (const p of pubs) {
+  const y = p.year ?? 'Earlier';
+  if (!byYear.has(y)) byYear.set(y, []);
+  byYear.get(y)!.push(p);
+}
+const years = [...byYear.keys()].sort((a, b) =>
+  typeof a === 'number' && typeof b === 'number' ? b - a : String(a).localeCompare(String(b)),
+);
+const statusLabel: Record<string, string> = {
+  '筹备中': 'in preparation',
+  '已投稿': 'submitted',
+  '已接收': 'accepted',
+  '已发表': 'published',
+};
 ---
 
 <Base title="Publications - openEarthModelling">
-  <main class="mx-auto max-w-[720px] px-6 pt-32 pb-16">
+  <main class="mx-auto max-w-[760px] px-6 pt-32 pb-16">
     <h1 class="text-3xl font-semibold tracking-tight">Publications</h1>
-    <p class="mt-4 text-base leading-relaxed" style="color: var(--text-dim);">
-      Peer-reviewed papers and preprints from the group will appear here.
-    </p>
+    <p class="lede">Peer-reviewed papers and preprints from the group.</p>
+
+    {
+      pubs.length === 0 ? (
+        <p class="empty">Nothing listed yet. Publications appear here once they are marked for the website.</p>
+      ) : (
+        years.map((y) => (
+          <section class="year">
+            <h2>{y}</h2>
+            <ul>
+              {byYear.get(y)!.map((p) => (
+                <li>
+                  <p class="title">
+                    {p.url ? <a href={p.url}>{p.title}</a> : p.title}
+                  </p>
+                  {p.authors && <p class="authors">{p.authors}</p>}
+                  <p class="venue">
+                    {p.venue}
+                    {p.volume ? `, ${p.volume}` : ''}
+                    {statusLabel[p.status] && p.status !== '已发表' && (
+                      <span class="status"> ({statusLabel[p.status]})</span>
+                    )}
+                  </p>
+                  {p.doi && (
+                    <p class="doi">
+                      DOI:{' '}
+                      <a href={p.doi.startsWith('http') ? p.doi : `https://doi.org/${p.doi}`}>
+                        {p.doi.replace(/^https?:\/\/doi\.org\//, '')}
+                      </a>
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
+      )
+    }
   </main>
 </Base>
+
+<style>
+  .lede {
+    margin-top: 1rem;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+  .empty {
+    margin-top: 2.5rem;
+    color: var(--text-dim);
+  }
+  .year {
+    margin-top: 3rem;
+  }
+  .year h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--accent-soft);
+    letter-spacing: 0.02em;
+    font-family: 'Geist Mono', ui-monospace, monospace;
+  }
+  .year ul {
+    margin: 1.2rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .year li {
+    padding: 1.1rem 0;
+    border-bottom: 1px solid #18181b;
+  }
+  .year li:last-child {
+    border-bottom: none;
+  }
+  .title {
+    font-size: 1.05rem;
+    font-weight: 500;
+    line-height: 1.45;
+    color: var(--text);
+  }
+  .title a {
+    color: var(--text);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .title a:hover {
+    color: var(--accent-soft);
+    border-bottom-color: rgba(103, 232, 249, 0.4);
+  }
+  .authors {
+    margin-top: 0.4rem;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .venue {
+    margin-top: 0.35rem;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    font-style: italic;
+  }
+  .status {
+    font-style: normal;
+    color: var(--accent);
+    font-size: 0.85rem;
+  }
+  .doi {
+    margin-top: 0.35rem;
+    font-size: 0.85rem;
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    color: var(--text-dim);
+  }
+  .doi a {
+    color: var(--accent-soft);
+    text-decoration: none;
+  }
+  .doi a:hover {
+    text-decoration: underline;
+  }
+</style>

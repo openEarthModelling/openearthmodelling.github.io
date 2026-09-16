@@ -42,8 +42,23 @@ Your text. Images go in `public/images/`, referenced as `/images/...`.
 
 Commit and push to `main`. The site rebuilds automatically.
 
-The Research Projects, Publications, and People sections follow the same
-content-collection pattern as they gain real content.
+## Publish from Feishu
+
+Posts and publications can also be written in Feishu and synced into the repository:
+
+```bash
+node scripts/sync.mjs blog          # publish rows marked 待发布 in the Blog registry table
+node scripts/sync.mjs publications  # regenerate src/data/publications.json
+node scripts/sync.mjs all --dry-run # preview without writing anything
+node scripts/sync.mjs all --no-push # write and commit locally, but do not push
+```
+
+The content pipeline (registry tables, status machine, permissions) is documented in
+[docs/design/content-pipeline.md](docs/design/content-pipeline.md). It requires `lark-cli`
+logged in to the group's Feishu account on the machine running the sync.
+
+The Research Projects and People sections follow the same content-collection
+pattern as they gain real content.
 
 ## Hero design
 
