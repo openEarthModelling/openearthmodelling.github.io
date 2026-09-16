@@ -7,3 +7,4 @@ npm-debug.log*
 .claude/
 .agents/
 skills-lock.json
+feishu-*-qr.png
