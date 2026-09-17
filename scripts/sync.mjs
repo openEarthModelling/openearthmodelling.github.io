@@ -119,6 +119,10 @@ function firstParagraph(md) {
 function localizeImages(md, slug) {
   const dir = `images/blog/${slug}`;
   let n = 0;
+  // 先清空该文章的图片目录, 防止飞书端增删/换序图片后旧文件残留
+  if (/!\[[^\]]*\]\([^)]*(?:feishu|lark)/i.test(md) && !DRY) {
+    rmSync(join(ROOT, 'public', dir), { recursive: true, force: true });
+  }
   const out = md.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (whole, alt, target) => {
     const token = target.match(/(?:file_token=|medias\/)([A-Za-z0-9_-]+)/)?.[1] ?? null;
     if (!token || !/feishu|lark/i.test(target)) return whole;
@@ -218,6 +222,7 @@ function syncBlog() {
     if (!title) patch['标题'] = finalTitle;
     if (!slugField) patch['文件名'] = slug;
     if (!row['摘要']) patch['摘要'] = desc;
+    if (!row['发布日期']) patch['发布日期'] = Date.now(); // 钉住首次发布日期, 防止后续同步漂移
     patch['已发布链接'] = `${SITE_URL}/blogs/${slug}/`;
     updates[row._recordId] = patch;
   }
