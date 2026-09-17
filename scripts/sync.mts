@@ -9,11 +9,17 @@
  *   published = live; sync only probes the revision, flips to "updated" on change
  *   updated   = live but the Feishu doc changed, awaiting manual re-approval
  *
+ * The Feishu document is the single source of truth for title/author/summary:
+ *   - title   = the document's own title (mirrored into the table for display)
+ *   - author  = "作者: X" line in the metadata block at the top of the document
+ *   - summary = "摘要: X" line in the same block (falls back to the first paragraph)
+ *
  * Identity split:
  *   all reads (tables, docs, media) -> bot (app identity, wiki member)
- *   table writes                    -> user (wiki admin; bot role is read-only)
+ *   writes (table rows, doc creation) -> user (wiki admin; bot role is read-only)
  *
  * Usage:
+ *   node scripts/sync.mts new "Article title"    # scaffold doc + table row
  *   node scripts/sync.mts blog|publications|all [--no-push] [--dry-run]
  */
 import { execFileSync } from 'node:child_process';
@@ -28,6 +34,9 @@ const BLOG_BASE = 'C4UHb2txzaU5IDsWrd2cGr7qnHe';
 const BLOG_TABLE = 'tblFnCEsTkKjwRAl';
 const PUBS_BASE = 'NRYTbayjcaD48asba8CcNyHined';
 const PUBS_TABLE = 'tblwuIiPOZshexEC';
+const BLOG_FOLDER = 'PEISfWypcl19k7dIWGwcfKjPnSb'; // OEM Blog folder
+const TEMPLATE_DOC = 'DWVRdzT6hoDKvaxroB1cd3lgnxd'; // 文章模板
+const TENANT = 'https://bcn2g3p87cdq.feishu.cn';
 const READ_IDENTITY = 'bot';
 const WRITE_IDENTITY = 'user';
 const SITE_URL = 'https://openearthmodelling.github.io';
@@ -55,12 +64,10 @@ interface DocumentData {
 type RawRow = Record<string, unknown> & { _recordId: string };
 interface BlogRow {
   recordId: string;
-  title: string;
+  mirrorTitle: string;
   status: string | null;
   doc: string;
   slug: string;
-  summary: string;
-  author: string;
   date: unknown;
   tags: string[];
   syncedRev: string;
@@ -77,10 +84,12 @@ interface Pub {
   tags: string[];
 }
 
-const args = process.argv.slice(2);
-const mode = args.find((a) => !a.startsWith('-')) ?? 'all';
-const NO_PUSH = args.includes('--no-push');
-const DRY = args.includes('--dry-run');
+const argv = process.argv.slice(2);
+const positional = argv.filter((a) => !a.startsWith('-'));
+const mode = positional[0] ?? 'all';
+const titleArg = positional.slice(1).join(' ');
+const NO_PUSH = argv.includes('--no-push');
+const DRY = argv.includes('--dry-run');
 
 // ---------------------------------------------------------------- lark-cli
 function lark<T>(cmdArgs: string[], identity: string): LarkEnvelope<T> {
@@ -130,17 +139,31 @@ function updateRecords(
   if (!res.ok) throw new Error(`failed to write back: ${res.error?.message}`);
 }
 
+function createRecord(baseToken: string, tableId: string, fields: Record<string, unknown>): void {
+  const res = lark<unknown>(
+    [
+      'base', '+record-batch-create',
+      '--base-token', baseToken, '--table-id', tableId,
+      '--json', JSON.stringify({ create_records: [fields] }),
+    ],
+    WRITE_IDENTITY,
+  );
+  if (!res.ok) throw new Error(`failed to create row: ${res.error?.message}`);
+}
+
 /** Lightweight revision probe: fetches only the heading outline. */
-function probeRevision(docUrl: string): number | null {
+function probeRevision(docUrl: string): { rev: number | null; title: string } {
   try {
     const res = lark<DocumentData>(
       ['docs', '+fetch', '--doc', docUrl, '--scope', 'outline', '--doc-format', 'markdown', '--json'],
       READ_IDENTITY,
     );
-    if (!res.ok || !res.data) return null;
-    return res.data.document.revision_id ?? null;
+    if (!res.ok || !res.data) return { rev: null, title: '' };
+    const content = res.data.document.content ?? '';
+    const h1 = content.match(/^#\s+(.+)$/m);
+    return { rev: res.data.document.revision_id ?? null, title: h1 ? h1[1].trim() : '' };
   } catch {
-    return null;
+    return { rev: null, title: '' };
   }
 }
 
@@ -172,6 +195,32 @@ function downloadMedia(token: string, outPath: string): boolean {
 // ---------------------------------------------------------------- helpers
 const today = (): string => new Date().toISOString().slice(0, 10);
 
+/** Strip the document title (first H1) and the metadata blockquote. */
+function parseDoc(raw: string): { title: string; author: string; summary: string; body: string } {
+  let content = raw.trim();
+  let title = '';
+  const h1 = content.match(/^#\s+(.+)$/m);
+  if (h1) {
+    title = h1[1].trim();
+    content = content.replace(/^#\s+.+\n?/m, '');
+  }
+  // leading blockquote block: lines like "> 作者: X" / "> 摘要: Y"
+  const lines = content.split('\n');
+  let i = 0;
+  while (i < lines.length && !(lines[i] ?? '').trim()) i++;
+  let author = '';
+  let summary = '';
+  while (i < lines.length && /^\s*>/.test(lines[i] ?? '')) {
+    const line = (lines[i] ?? '').replace(/^\s*>\s?/, '').trim();
+    const a = line.match(/^作者\s*[:：]\s*(.+)$/);
+    if (a) author = a[1].trim();
+    const s = line.match(/^摘要\s*[:：]\s*(.+)$/);
+    if (s) summary = s[1].trim();
+    i++;
+  }
+  return { title, author, summary, body: lines.slice(i).join('\n').trim() };
+}
+
 function toDate(v: unknown): string | null {
   if (!v) return null;
   if (typeof v === 'number') return new Date(v).toISOString().slice(0, 10);
@@ -187,8 +236,7 @@ function slugify(title: string): string {
     .replace(/[^\p{L}\p{N}-]+/gu, '')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
-  // Pure-CJK titles would produce ugly percent-encoded URLs; fall back to a
-  // timestamp. Authors can always set the slug explicitly via the table.
+  // Pure-CJK titles would produce ugly percent-encoded URLs; fall back to a timestamp.
   if (!/[a-z0-9]/.test(s)) return `post-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}`;
   return s || `post-${today()}`;
 }
@@ -255,17 +303,40 @@ function commitAndPush(message: string): void {
   }
 }
 
+// ---------------------------------------------------------------- new
+function createNew(title: string): void {
+  if (!title) {
+    console.error('usage: node scripts/sync.mts new "Article title"');
+    process.exit(1);
+  }
+  if (DRY) {
+    console.log(`[dry-run] would copy the template as "${title}" and add a draft row`);
+    return;
+  }
+  const cp = lark<{ file?: { token?: string; url?: string } } & Record<string, unknown>>(
+    ['drive', '+copy', '--token', TEMPLATE_DOC, '--type', 'docx',
+     '--folder-token', BLOG_FOLDER, '--name', title, '--json'],
+    WRITE_IDENTITY,
+  );
+  if (!cp.ok || !cp.data) throw new Error(`template copy failed: ${cp.error?.message}`);
+  const file = (cp.data.file ?? cp.data) as { token?: string; url?: string };
+  const url = file.url ?? `${TENANT}/docx/${file.token ?? ''}`;
+  createRecord(BLOG_BASE, BLOG_TABLE, { '标题': title, '文档': url, '状态': [S_DRAFT] });
+  console.log(`created: ${title}`);
+  console.log(`  doc: ${url}`);
+  console.log('  row added to the Blog table with status "draft"');
+  console.log('  write the article, then set the status to "pending" and run: node scripts/sync.mts blog');
+}
+
 // ---------------------------------------------------------------- blog
 function toBlogRow(r: RawRow): BlogRow {
   const tags = Array.isArray(r['标签']) ? (r['标签'] as string[]) : [];
   return {
     recordId: r._recordId,
-    title: str(r['标题']),
+    mirrorTitle: str(r['标题']),
     status: firstSelect(r['状态']),
     doc: str(r['文档']),
     slug: str(r['文件名']),
-    summary: str(r['摘要']),
-    author: str(r['作者']),
     date: r['发布日期'],
     tags,
     syncedRev: str(r['已同步版本']),
@@ -292,27 +363,31 @@ function syncBlog(): void {
     }
 
     if (!row.doc) {
-      console.warn(`- skip (no doc link): ${row.title || row.recordId}`);
+      console.warn(`- skip (no doc link): ${row.recordId}`);
       skipped++;
       continue;
     }
 
     // --- updated: waiting for manual re-approval, do nothing ---
     if (row.status === S_STALE) {
-      console.log(`- awaiting review (updated): ${row.title || row.doc}`);
+      console.log(`- awaiting review (updated): ${row.mirrorTitle || row.doc}`);
       skipped++;
       continue;
     }
 
     // --- published: lightweight revision probe, never auto-republish ---
     if (row.status === S_LIVE) {
-      const cur = probeRevision(row.doc);
-      if (cur === null) {
-        console.warn(`- probe failed (skipped, untouched): ${row.title || row.doc}`);
+      const { rev, title } = probeRevision(row.doc);
+      if (rev === null) {
+        console.warn(`- probe failed (skipped, untouched): ${row.mirrorTitle || row.doc}`);
         skipped++;
-      } else if (String(cur) !== row.syncedRev) {
-        console.log(`- content changed -> flag as "${S_STALE}", awaiting manual confirm: ${row.title || row.doc}`);
-        if (!DRY) updates[row.recordId] = { '状态': [S_STALE] };
+      } else if (String(rev) !== row.syncedRev) {
+        console.log(`- content changed -> flag as "${S_STALE}", awaiting manual confirm: ${title || row.mirrorTitle || row.doc}`);
+        if (!DRY) {
+          const patch: Record<string, unknown> = { '状态': [S_STALE] };
+          if (title && title !== row.mirrorTitle) patch['标题'] = title; // keep the mirror fresh
+          updates[row.recordId] = patch;
+        }
         flagged++;
       } else {
         same++;
@@ -322,20 +397,14 @@ function syncBlog(): void {
 
     // --- pending: the only publish path ---
     if (row.status === S_PENDING) {
-      const { content: rawContent, rev } = fetchDoc(row.doc);
-      let content = rawContent;
-      let docTitle = '';
-      const h1 = content.match(/^#\s+(.+)$/m);
-      if (h1) {
-        docTitle = h1[1].trim();
-        content = content.replace(/^#\s+.+\n?/m, '');
-      }
-      const finalTitle = row.title || docTitle || 'Untitled';
+      const { content, rev } = fetchDoc(row.doc);
+      const meta = parseDoc(content);
+      const finalTitle = meta.title || row.mirrorTitle || 'Untitled';
       const slug = row.slug || slugify(finalTitle);
-      const loc = localizeImages(content, slug);
+      const loc = localizeImages(meta.body, slug);
       const date = toDate(row.date) ?? today();
-      const desc = row.summary || firstParagraph(loc.md);
-      const author = row.author || 'Fan Zhang';
+      const desc = meta.summary || firstParagraph(loc.md);
+      const author = meta.author || 'Fan Zhang';
 
       const fm = [
         '---',
@@ -358,10 +427,8 @@ function syncBlog(): void {
       console.log(`- ${existed ? 'update' : 'publish'}: ${finalTitle}  ->  /blogs/${slug}/`);
       existed ? updated++ : published++;
 
-      const patch: Record<string, unknown> = { '状态': [S_LIVE] };
-      if (!row.title) patch['标题'] = finalTitle;
+      const patch: Record<string, unknown> = { '状态': [S_LIVE], '标题': finalTitle };
       if (!row.slug) patch['文件名'] = slug;
-      if (!row.summary) patch['摘要'] = desc;
       if (!row.date) patch['发布日期'] = Date.now(); // pin first-publish date
       if (rev !== null) patch['已同步版本'] = String(rev);
       patch['已发布链接'] = `${SITE_URL}/blogs/${slug}/`;
@@ -417,11 +484,12 @@ function syncPublications(): void {
 }
 
 // ---------------------------------------------------------------- main
-if (!['blog', 'publications', 'all'].includes(mode)) {
-  console.error('usage: node scripts/sync.mts blog|publications|all [--no-push] [--dry-run]');
+if (!['new', 'blog', 'publications', 'all'].includes(mode)) {
+  console.error('usage: node scripts/sync.mts new "Title" | blog|publications|all [--no-push] [--dry-run]');
   process.exit(1);
 }
 if (DRY) console.log('(dry-run: no writes, no commits)');
+if (mode === 'new') createNew(titleArg);
 if (mode === 'blog' || mode === 'all') syncBlog();
 if (mode === 'publications' || mode === 'all') syncPublications();
 console.log('\ndone.');
