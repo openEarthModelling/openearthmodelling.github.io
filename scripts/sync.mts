@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 /**
- * 飞书 → 官网 内容同步(TypeScript,Node >= 23.6 原生运行,无需编译)
- * 设计文档: docs/design/content-pipeline.md
+ * Feishu -> website content sync (TypeScript, runs natively on Node >= 23.6).
+ * Design doc: docs/design/content-pipeline.md
  *
- * 状态机(手动闸门,方案一):
- *   草稿        = 不上站(已发布的会下架)
- *   待发布      = 发布指令,唯一触发器,只能由人手动设置
- *   已发布      = 线上在架;同步只做轻量版本探测,内容变化则翻成"有更新"
- *   有更新      = 在架但飞书内容已变,等人工复核(选回"待发布"才会重新发布)
+ * State machine (manual publish gate):
+ *   draft     = not on the site (removes the article if it was published)
+ *   pending   = publish order, the ONLY trigger, set manually by a human
+ *   published = live; sync only probes the revision, flips to "updated" on change
+ *   updated   = live but the Feishu doc changed, awaiting manual re-approval
  *
- * 身份分工(见设计文档 §6):
- *   文档读取/图片下载 → bot(应用身份,知识库成员)
- *   表格读写         → user(知识库管理员)
+ * Identity split:
+ *   all reads (tables, docs, media) -> bot (app identity, wiki member)
+ *   table writes                    -> user (wiki admin; bot role is read-only)
  *
- * 用法:
+ * Usage:
  *   node scripts/sync.mts blog|publications|all [--no-push] [--dry-run]
  */
 import { execFileSync } from 'node:child_process';
@@ -23,20 +23,20 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// ---- 飞书侧常量 ----
+// ---- Feishu constants ----
 const BLOG_BASE = 'C4UHb2txzaU5IDsWrd2cGr7qnHe';
 const BLOG_TABLE = 'tblFnCEsTkKjwRAl';
 const PUBS_BASE = 'NRYTbayjcaD48asba8CcNyHined';
 const PUBS_TABLE = 'tblwuIiPOZshexEC';
-const DOC_IDENTITY = 'bot'; // 文档/媒体读取
-const TABLE_IDENTITY = 'user'; // 表格读写
+const READ_IDENTITY = 'bot';
+const WRITE_IDENTITY = 'user';
 const SITE_URL = 'https://openearthmodelling.github.io';
 
-// ---- 状态机常量 ----
-const S_DRAFT = '草稿';
-const S_PENDING = '待发布';
-const S_LIVE = '已发布';
-const S_STALE = '有更新';
+// ---- state machine ----
+const S_DRAFT = 'draft';
+const S_PENDING = 'pending';
+const S_LIVE = 'published';
+const S_STALE = 'updated';
 
 // ---------------------------------------------------------------- types
 interface LarkEnvelope<T> {
@@ -65,6 +65,17 @@ interface BlogRow {
   tags: string[];
   syncedRev: string;
 }
+interface Pub {
+  title: string;
+  authors: string;
+  status: string;
+  venue: string;
+  year: number | null;
+  volume: string;
+  doi: string;
+  url: string;
+  tags: string[];
+}
 
 const args = process.argv.slice(2);
 const mode = args.find((a) => !a.startsWith('-')) ?? 'all';
@@ -80,21 +91,20 @@ function lark<T>(cmdArgs: string[], identity: string): LarkEnvelope<T> {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const i = out.indexOf('{');
-  if (i < 0) throw new Error(`lark-cli 无 JSON 输出: ${out.slice(0, 200)}`);
+  if (i < 0) throw new Error(`lark-cli produced no JSON: ${out.slice(0, 200)}`);
   return JSON.parse(out.slice(i)) as LarkEnvelope<T>;
 }
 
-const str = (v: unknown): string =>
-  typeof v === 'string' ? v.trim() : '';
+const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 const firstSelect = (v: unknown): string | null =>
   Array.isArray(v) ? ((v[0] as string) ?? null) : ((v as string) ?? null);
 
 function fetchRows(baseToken: string, tableId: string): RawRow[] {
   const res = lark<RecordListData>(
     ['base', '+record-list', '--base-token', baseToken, '--table-id', tableId, '--json'],
-    TABLE_IDENTITY,
+    READ_IDENTITY,
   );
-  if (!res.ok || !res.data) throw new Error(`读取表格失败: ${res.error?.message}`);
+  if (!res.ok || !res.data) throw new Error(`failed to read table: ${res.error?.message}`);
   const names = res.data.fields ?? [];
   const ids = res.data.record_id_list ?? [];
   return (res.data.data ?? []).map((row, i) => {
@@ -104,24 +114,28 @@ function fetchRows(baseToken: string, tableId: string): RawRow[] {
   });
 }
 
-function updateRecords(baseToken: string, tableId: string, updates: Record<string, Record<string, unknown>>): void {
+function updateRecords(
+  baseToken: string,
+  tableId: string,
+  updates: Record<string, Record<string, unknown>>,
+): void {
   const res = lark<unknown>(
     [
       'base', '+record-batch-update',
       '--base-token', baseToken, '--table-id', tableId,
       '--json', JSON.stringify({ update_records: updates }),
     ],
-    TABLE_IDENTITY,
+    WRITE_IDENTITY,
   );
-  if (!res.ok) throw new Error(`回写失败: ${res.error?.message}`);
+  if (!res.ok) throw new Error(`failed to write back: ${res.error?.message}`);
 }
 
-/** 轻量版本探测:只拉标题目录,返回当前 revision_id */
+/** Lightweight revision probe: fetches only the heading outline. */
 function probeRevision(docUrl: string): number | null {
   try {
     const res = lark<DocumentData>(
       ['docs', '+fetch', '--doc', docUrl, '--scope', 'outline', '--doc-format', 'markdown', '--json'],
-      DOC_IDENTITY,
+      READ_IDENTITY,
     );
     if (!res.ok || !res.data) return null;
     return res.data.document.revision_id ?? null;
@@ -130,13 +144,13 @@ function probeRevision(docUrl: string): number | null {
   }
 }
 
-/** 全量拉取正文(仅发布路径使用),返回正文与版本号 */
+/** Full content fetch (publish path only). Returns content plus revision. */
 function fetchDoc(docUrl: string): { content: string; rev: number | null } {
   const res = lark<DocumentData>(
     ['docs', '+fetch', '--doc', docUrl, '--doc-format', 'markdown', '--json'],
-    DOC_IDENTITY,
+    READ_IDENTITY,
   );
-  if (!res.ok || !res.data) throw new Error(`拉取文档失败(${docUrl}): ${res.error?.message}`);
+  if (!res.ok || !res.data) throw new Error(`failed to fetch doc (${docUrl}): ${res.error?.message}`);
   return {
     content: res.data.document.content ?? '',
     rev: res.data.document.revision_id ?? null,
@@ -147,7 +161,7 @@ function downloadMedia(token: string, outPath: string): boolean {
   try {
     const res = lark<unknown>(
       ['docs', '+media-download', '--token', token, '--output', outPath, '--overwrite', '--json'],
-      DOC_IDENTITY,
+      READ_IDENTITY,
     );
     return res.ok === true;
   } catch {
@@ -173,7 +187,8 @@ function slugify(title: string): string {
     .replace(/[^\p{L}\p{N}-]+/gu, '')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
-  // 纯 CJK 标题会产生难看的百分号编码 URL, 用时间戳兜底; 手动填"文件名"字段可覆盖
+  // Pure-CJK titles would produce ugly percent-encoded URLs; fall back to a
+  // timestamp. Authors can always set the slug explicitly via the table.
   if (!/[a-z0-9]/.test(s)) return `post-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}`;
   return s || `post-${today()}`;
 }
@@ -188,11 +203,11 @@ function firstParagraph(md: string): string {
   return '';
 }
 
-/** 把 markdown 里的飞书图片换成站内路径;下载失败保留原链接并告警 */
+/** Replace Feishu image links with local paths; keep original on failure. */
 function localizeImages(md: string, slug: string): { md: string; dir: string | null } {
   const dir = `images/blog/${slug}`;
   let n = 0;
-  // 先清空该文章的图片目录, 防止飞书端增删/换序图片后旧文件残留
+  // wipe the article's image dir first so reordered/removed images leave no orphans
   if (/!\[[^\]]*\]\([^)]*(?:feishu|lark)/i.test(md) && !DRY) {
     rmSync(join(ROOT, 'public', dir), { recursive: true, force: true });
   }
@@ -208,7 +223,7 @@ function localizeImages(md: string, slug: string): { md: string; dir: string | n
       for (const ext of ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']) {
         if (downloadMedia(token, `${dest}.${ext}`)) return `![${alt}](/${dir}/${name}.${ext})`;
       }
-      console.warn(`  ⚠ 图片下载失败, 保留原链接: ${target}`);
+      console.warn(`  warning: image download failed, keeping remote link: ${target}`);
       return whole;
     },
   );
@@ -222,21 +237,21 @@ function git(...a: string[]): string {
 
 function commitAndPush(message: string): void {
   if (DRY) {
-    console.log(`  [dry-run] 跳过提交: ${message}`);
+    console.log(`  [dry-run] skip commit: ${message}`);
     return;
   }
   const status = git('status', '--porcelain');
   if (!status.trim()) {
-    console.log('  无内容变化, 跳过提交');
+    console.log('  no content changes, skip commit');
     return;
   }
   git('add', '-A');
   git('commit', '-m', message);
   if (!NO_PUSH) {
     git('push');
-    console.log('  已推送, GitHub Actions 将自动构建上线');
+    console.log('  pushed; GitHub Actions will rebuild the site');
   } else {
-    console.log('  已本地提交(--no-push, 未推送)');
+    console.log('  committed locally (--no-push)');
   }
 }
 
@@ -258,18 +273,18 @@ function toBlogRow(r: RawRow): BlogRow {
 }
 
 function syncBlog(): void {
-  console.log('\n=== Blog 同步 ===');
+  console.log('\n=== Blog sync ===');
   const rows = fetchRows(BLOG_BASE, BLOG_TABLE).map(toBlogRow);
-  console.log(`表中 ${rows.length} 行`);
+  console.log(`${rows.length} rows in table`);
 
   let published = 0, updated = 0, removed = 0, flagged = 0, same = 0, skipped = 0;
   const updates: Record<string, Record<string, unknown>> = {};
 
   for (const row of rows) {
-    // --- 草稿/空:下架 ---
+    // --- draft/empty: unpublish ---
     if (!row.status || row.status === S_DRAFT) {
       if (row.slug && existsSync(join(ROOT, 'src/content/blog', `${row.slug}.md`))) {
-        console.log(`- 下架: ${row.slug}`);
+        console.log(`- unpublish: ${row.slug}`);
         if (!DRY) rmSync(join(ROOT, 'src/content/blog', `${row.slug}.md`));
         removed++;
       } else skipped++;
@@ -277,26 +292,26 @@ function syncBlog(): void {
     }
 
     if (!row.doc) {
-      console.warn(`- 跳过(无文档链接): ${row.title || row.recordId}`);
+      console.warn(`- skip (no doc link): ${row.title || row.recordId}`);
       skipped++;
       continue;
     }
 
-    // --- 有更新:等待人工复核,什么都不做 ---
+    // --- updated: waiting for manual re-approval, do nothing ---
     if (row.status === S_STALE) {
-      console.log(`- 待复核(有更新): ${row.title || row.doc}`);
+      console.log(`- awaiting review (updated): ${row.title || row.doc}`);
       skipped++;
       continue;
     }
 
-    // --- 已发布:轻量版本探测,变化则翻"有更新",绝不自动重发 ---
+    // --- published: lightweight revision probe, never auto-republish ---
     if (row.status === S_LIVE) {
       const cur = probeRevision(row.doc);
       if (cur === null) {
-        console.warn(`- 探测失败(跳过,不改动): ${row.title || row.doc}`);
+        console.warn(`- probe failed (skipped, untouched): ${row.title || row.doc}`);
         skipped++;
       } else if (String(cur) !== row.syncedRev) {
-        console.log(`- 内容有变化 → 标记"有更新",等人工确认: ${row.title || row.doc}`);
+        console.log(`- content changed -> flag as "${S_STALE}", awaiting manual confirm: ${row.title || row.doc}`);
         if (!DRY) updates[row.recordId] = { '状态': [S_STALE] };
         flagged++;
       } else {
@@ -305,7 +320,7 @@ function syncBlog(): void {
       continue;
     }
 
-    // --- 待发布:唯一发布路径 ---
+    // --- pending: the only publish path ---
     if (row.status === S_PENDING) {
       const { content: rawContent, rev } = fetchDoc(row.doc);
       let content = rawContent;
@@ -340,14 +355,14 @@ function syncBlog(): void {
         mkdirSync(dirname(file), { recursive: true });
         writeFileSync(file, `${fm}\n\n${loc.md.trim()}\n`);
       }
-      console.log(`- ${existed ? '更新' : '发布'}: ${finalTitle}  →  /blogs/${slug}/`);
+      console.log(`- ${existed ? 'update' : 'publish'}: ${finalTitle}  ->  /blogs/${slug}/`);
       existed ? updated++ : published++;
 
       const patch: Record<string, unknown> = { '状态': [S_LIVE] };
       if (!row.title) patch['标题'] = finalTitle;
       if (!row.slug) patch['文件名'] = slug;
       if (!row.summary) patch['摘要'] = desc;
-      if (!row.date) patch['发布日期'] = Date.now(); // 钉住首次发布日期
+      if (!row.date) patch['发布日期'] = Date.now(); // pin first-publish date
       if (rev !== null) patch['已同步版本'] = String(rev);
       patch['已发布链接'] = `${SITE_URL}/blogs/${slug}/`;
       if (!DRY) updates[row.recordId] = patch;
@@ -359,10 +374,10 @@ function syncBlog(): void {
 
   if (Object.keys(updates).length && !DRY) {
     updateRecords(BLOG_BASE, BLOG_TABLE, updates);
-    console.log(`  回写 ${Object.keys(updates).length} 行`);
+    console.log(`  wrote back ${Object.keys(updates).length} rows`);
   }
   console.log(
-    `结果: 新发布 ${published}, 更新 ${updated}, 标记有更新 ${flagged}, 无变化 ${same}, 下架 ${removed}, 跳过 ${skipped}`,
+    `summary: published ${published}, updated ${updated}, flagged ${flagged}, unchanged ${same}, unpublished ${removed}, skipped ${skipped}`,
   );
   if (published || updated || removed) {
     commitAndPush(`Sync blog from Feishu (${new Date().toISOString().slice(0, 16)}Z)`);
@@ -370,35 +385,25 @@ function syncBlog(): void {
 }
 
 // ---------------------------------------------------------------- publications
-interface Pub {
-  title: string;
-  authors: string;
-  status: string;
-  venue: string;
-  year: number | null;
-  volume: string;
-  doi: string;
-  url: string;
-  tags: string[];
-}
-
 function syncPublications(): void {
-  console.log('\n=== Publications 同步 ===');
+  console.log('\n=== Publications sync ===');
   const rows = fetchRows(PUBS_BASE, PUBS_TABLE);
   const marked = rows.filter((r) => r['上网站'] === true);
-  console.log(`表中 ${rows.length} 行, 勾选上网站 ${marked.length} 行`);
+  console.log(`${rows.length} rows in table, ${marked.length} marked for the site`);
 
-  const pubs: Pub[] = marked.map((r) => ({
-    title: typeof r['标题'] === 'string' ? r['标题'] : '',
-    authors: typeof r['作者'] === 'string' ? r['作者'] : '',
-    status: firstSelect(r['状态']) ?? '',
-    venue: typeof r['期刊/会议'] === 'string' ? r['期刊/会议'] : '',
-    year: typeof r['年份'] === 'number' ? (r['年份'] as number) : null,
-    volume: typeof r['卷期页码'] === 'string' ? r['卷期页码'] : '',
-    doi: typeof r['DOI'] === 'string' ? r['DOI'] : '',
-    url: typeof r['链接'] === 'string' ? r['链接'] : '',
-    tags: Array.isArray(r['标签']) ? (r['标签'] as string[]) : [],
-  })).filter((p) => p.title);
+  const pubs: Pub[] = marked
+    .map((r) => ({
+      title: typeof r['标题'] === 'string' ? r['标题'] : '',
+      authors: typeof r['作者'] === 'string' ? r['作者'] : '',
+      status: firstSelect(r['状态']) ?? '',
+      venue: typeof r['期刊/会议'] === 'string' ? r['期刊/会议'] : '',
+      year: typeof r['年份'] === 'number' ? (r['年份'] as number) : null,
+      volume: typeof r['卷期页码'] === 'string' ? r['卷期页码'] : '',
+      doi: typeof r['DOI'] === 'string' ? r['DOI'] : '',
+      url: typeof r['链接'] === 'string' ? r['链接'] : '',
+      tags: Array.isArray(r['标签']) ? (r['标签'] as string[]) : [],
+    }))
+    .filter((p) => p.title);
 
   pubs.sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.title.localeCompare(b.title));
 
@@ -407,16 +412,16 @@ function syncPublications(): void {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, JSON.stringify(pubs, null, 2) + '\n');
   }
-  console.log(`  写入 ${pubs.length} 条 → src/data/publications.json`);
+  console.log(`  wrote ${pubs.length} entries -> src/data/publications.json`);
   commitAndPush(`Sync publications from Feishu (${new Date().toISOString().slice(0, 16)}Z)`);
 }
 
 // ---------------------------------------------------------------- main
 if (!['blog', 'publications', 'all'].includes(mode)) {
-  console.error('用法: node scripts/sync.mts blog|publications|all [--no-push] [--dry-run]');
+  console.error('usage: node scripts/sync.mts blog|publications|all [--no-push] [--dry-run]');
   process.exit(1);
 }
-if (DRY) console.log('(dry-run 模式: 不落盘/不回写/不提交)');
+if (DRY) console.log('(dry-run: no writes, no commits)');
 if (mode === 'blog' || mode === 'all') syncBlog();
 if (mode === 'publications' || mode === 'all') syncPublications();
-console.log('\n完成。');
+console.log('\ndone.');

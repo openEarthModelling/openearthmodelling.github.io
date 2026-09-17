@@ -12,10 +12,9 @@ const years = [...byYear.keys()].sort((a, b) =>
   typeof a === 'number' && typeof b === 'number' ? b - a : String(a).localeCompare(String(b)),
 );
 const statusLabel: Record<string, string> = {
-  '筹备中': 'in preparation',
-  '已投稿': 'submitted',
-  '已接收': 'accepted',
-  '已发表': 'published',
+  'in preparation': 'in preparation',
+  submitted: 'submitted',
+  accepted: 'accepted',
 };
 ---
 
@@ -41,7 +40,7 @@ const statusLabel: Record<string, string> = {
                   <p class="venue">
                     {p.venue}
                     {p.volume ? `, ${p.volume}` : ''}
-                    {statusLabel[p.status] && p.status !== '已发表' && (
+                    {statusLabel[p.status] && (
                       <span class="status"> ({statusLabel[p.status]})</span>
                     )}
                   </p>
