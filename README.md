@@ -48,15 +48,18 @@ Posts and publications can also be written in Feishu and synced into the reposit
 (requires Node >= 23.6 to run the TypeScript sync script natively):
 
 ```bash
-node scripts/sync.mts blog          # publish rows marked 待发布 in the Blog registry table
-node scripts/sync.mts publications  # regenerate src/data/publications.json
-node scripts/sync.mts all --dry-run # preview without writing anything
-node scripts/sync.mts all --no-push # write and commit locally, but do not push
+node scripts/sync.mts new "Article title"  # scaffold: copy the doc template + add a draft row
+node scripts/sync.mts blog                 # publish rows in "pending" state
+node scripts/sync.mts publications         # regenerate src/data/publications.json
+node scripts/sync.mts all --dry-run        # preview without writing anything
+node scripts/sync.mts all --no-push        # write and commit locally, but do not push
 ```
 
-Editing a published document in Feishu never redeploys automatically: the sync
-flags the row as 有更新 (has updates) after a lightweight revision probe, and the
-change only ships after you manually set the row back to 待发布.
+The Feishu document is the source of truth for the article: its title, and the
+author/summary metadata block at the top of the body. Editing a published
+document never redeploys automatically: the sync flips the row to "updated"
+after a lightweight revision probe, and the change only ships after you set the
+row back to "pending".
 
 The content pipeline (registry tables, status machine, permissions) is documented in
 [docs/design/content-pipeline.md](docs/design/content-pipeline.md). It requires `lark-cli`

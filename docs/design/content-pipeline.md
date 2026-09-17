@@ -16,15 +16,19 @@
 
 ---
 
-## 1. 知识库最终形态(v1.3 精简)
+## 1. 知识库与云空间形态(v1.4)
 
 ```
-OEM Website/(知识库, space_id 7686102458560433448)
-├── 📊 Blog            ← 博客文档登记与发布开关(Base token C4UHb2txzaU5IDsWrd2cGr7qnHe)
+知识库 OEM Website/(space_id 7686102458560433448)
+├── 📊 Blog            ← 发布登记与状态机(Base token C4UHb2txzaU5IDsWrd2cGr7qnHe)
 └── 📊 Publications    ← 论文台账,表即内容(Base token NRYTbayjcaD48asba8CcNyHined)
+
+云空间 文件夹 OEM Blog/(folder token PEISfWypcl19k7dIWGwcfKjPnSb)
+├── 文章模板            ← 建档命令的蓝本(doc token DWVRdzT6hoDKvaxroB1cd3lgnxd)
+└── (每篇文章一个文档)
 ```
 
-v1.3 变更:删除了早期的 Blog/Projects/Publications 文档节点(用户决策,知识库只保留两张多维表格);博客正文写在任何飞书文档里,把链接登记进 Blog 表即可。表内字段名保持中文(录入体验),**状态列取值用英文**(与代码统一):draft / pending / published / updated。
+职责划分:**表管登记与状态,文件夹管正文**。正文全部收拢在 OEM Blog 文件夹(便于管理);表内字段名保持中文(录入体验),**状态取值英文**:draft / pending / published / updated。
 
 ---
 
@@ -34,19 +38,32 @@ v1.3 变更:删除了早期的 Blog/Projects/Publications 文档节点(用户决
 
 | 字段 | 类型 | 谁填 | 说明 |
 |---|---|---|---|
-| 标题 | 文本 | **脚本回填** | 取文档标题(表里已有值则不覆盖) |
-| 文档 | 文本 | **用户** | 粘贴飞书文档链接(必填) |
-| 状态 | 单选 | 用户+脚本 | **draft / pending / published / updated**(英文,见状态机) |
-| 标签 | 多选 | 用户(可选) | 网站上的分类标签,如 气溶胶 / 海洋 / 教程 |
-| 作者 | 文本 | 脚本回填 | 空则默认 Fan Zhang |
-| 摘要 | 文本 | 脚本回填 | 空则取正文首段前 ~140 字(表里已有值则不覆盖) |
-| 文件名 | 文本 | 脚本回填 | slug,首次同步生成后**永久固定**;纯 CJK 标题自动用时间戳命名,可手动填写覆盖 |
-| 发布日期 | 日期 | 用户(可选) | 空则取首次同步当天并**回写钉死**,后续同步不漂移 |
-| 已同步版本 | 文本 | 脚本回填 | 上次发布时的文档 revision_id,增量检测用 |
-| 已发布链接 | 文本 | 脚本回填 | 网站 URL,点开即看 |
-| 创建时间 | 自动 | 系统 | 行创建时间 |
+| ID | 自动编号 | 系统 | NO.001 起 |
+| 标题 | 文本(主字段) | **脚本镜像** | 每次发布/探测时镜像文档标题,**纯展示**,不改数据流向 |
+| 文档 | 文本 | **用户/脚本** | 飞书文档链接;`new` 命令自动生成 |
+| 状态 | 单选 | 用户+脚本 | **draft / pending / published / updated** |
+| 标签 | 多选 | 用户(可选) | 网站分类标签 |
+| 发布日期 | 日期 | 脚本回填 | 空则取首次发布当天并**钉死**,不漂移 |
+| 已发布链接 | 文本 | 脚本回填 | 网站 URL |
+| 文件名 | 文本 | **脚本控制** | slug(网址名),**隐藏于"同步状态"视图**;首次发布生成后永久固定 |
+| 已同步版本 | 文本 | 脚本回填 | 上次发布时的 revision_id,**隐藏于"同步状态"视图** |
 
-**视图**:看板(按状态,日常工作台)+ 表格(全量)
+**视图**:主视图(标题/ID/文档/状态/标签/发布日期/已发布链接,7 列)+ 同步状态(内部字段)
+
+**元数据在文档里,不在表里**(v1.4):标题 = 文档标题;作者、摘要写在文档顶部的**引用块元信息模板**中:
+
+```
+> 作者: Fan Zhang
+> 摘要: (可留空,留空则自动取正文首段)
+```
+
+### 建档流程(`new` 命令)
+
+```bash
+node scripts/sync.mts new "Article title"
+```
+
+复制模板文档到 OEM Blog 文件夹 → 在 Blog 表建一行(标题镜像 + 文档链接 + 状态 draft)→ 你点开链接写正文 → 状态切 pending → 同步发布。
 
 **状态机(v1.3,手动发布闸门,取值英文)**:
 
@@ -97,17 +114,18 @@ v1.3 变更:删除了早期的 Blog/Projects/Publications 文档节点(用户决
 
 ```
 扫表
-  ├─ 草稿/空 → 删除站上对应文章(下架)
-  ├─ 有更新 → 跳过,等人工复核
-  ├─ 已发布 → 轻量探测 revision_id(docs +fetch --scope outline,bot 身份)
+  ├─ draft/空   → 删除站上对应文章(下架)
+  ├─ updated    → 跳过,等人工复核
+  ├─ published  → 轻量探测 revision_id(docs +fetch --scope outline,bot 身份)
   │     ├─ 与"已同步版本"相同 → 跳过(不拉正文)
-  │     └─ 不同 → 状态翻"有更新",不碰网站
-  └─ 待发布 → 拉文档(docs +fetch --doc-format markdown,bot 身份)
+  │     └─ 不同 → 状态翻 updated,顺带镜像最新标题,不碰网站
+  └─ pending    → 拉文档(docs +fetch --doc-format markdown,bot 身份)
+        → 解析:标题=文档 H1;作者/摘要=顶部引用块元信息;正文=其余
         → 图片下载到 public/images/blog/(先清旧图),图链替换为本地路径
         → 生成 src/content/blog/<文件名>.md(含 frontmatter)
         → git commit + push → GitHub Actions 自动构建上线
-        → 回写(user 身份):状态=已发布、已同步版本、发布日期钉定、
-          已发布链接、标题/摘要/文件名(空字段才填)
+        → 回写(user 身份):状态=published、标题镜像、已同步版本、
+          文件名(空则生成)、发布日期钉定、已发布链接
 ```
 
 ### Publications:表 → 数据文件
@@ -127,10 +145,10 @@ Publications 不经过 Markdown,因为它是**结构化数据**不是长文;页�
 
 | 改动 | 说明 |
 |---|---|
-| `src/content/blog/` | **不变**,脚本按现有 schema 生成 frontmatter |
-| `src/data/publications.json` | 新增,由脚本生成 |
-| `src/pages/publications.astro` | 重做:按年份分组的论文列表(标题/作者/期刊/DOI/链接) |
-| `scripts/sync.mjs` | 新增,支持 `sync.mjs blog` / `sync.mjs publications` / `sync.mjs all` |
+| `src/content/blog/` | 由脚本生成 md(frontmatter 来自文档元信息) |
+| `src/data/publications.json` | 由脚本生成 |
+| `src/pages/publications.astro` | 按年份分组的论文列表 |
+| `scripts/sync.mts` | TypeScript(Node≥23.6 原生跑);`new "Title"` 建档 / `blog` / `publications` / `all`,支持 `--no-push` / `--dry-run` |
 
 ---
 
